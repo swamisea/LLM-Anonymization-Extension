@@ -1,7 +1,12 @@
+import { browser } from 'wxt/browser';
+
 let lastKeyPressTime = 0;
 let lastPressedKey = "";
 const DOUBLE_PRESS_THRESHOLD = 500; // This is the threshold between key presses (500ms)
-const pii_hashamp: { [key: string]: string } = {};
+const pii_hashmap: Record<string, string> = {};
+const piiCountHashmap: Record<string, number> = {};
+const piiHashmap: Record<string, string> = {};
+const piiReverseHashmap: Record<string, string> = {};
 let total_pii_count = 0;
 let emailCount = 0;
 let phoneCount = 0;
@@ -9,7 +14,7 @@ let phoneCount = 0;
 export default defineContentScript({
   matches: ["https://gemini.google.com/*"],
   main() {
-    window.addEventListener('keydown', (event) => {
+    window.addEventListener('keydown', async (event) => {
       const currentTime = new Date().getTime();
       const key = event.shiftKey;
       if (event.key === 'Shift') {
@@ -23,7 +28,9 @@ export default defineContentScript({
             if (textInputContent) {
               const originalText = textInputContent.textContent || "";
               // Modify the text and update the DOM (text input field)
-              textInputContent.textContent = transformText(originalText);
+              const llm_response = await pii_scrub(originalText);
+              textInputContent.textContent = llm_response;
+              //textInputContent.textContent = transformText(originalText);
               lastPressedKey = "";
               lastKeyPressTime = 0;
               return;
@@ -50,17 +57,62 @@ function transformText(text: string): string {
       total_pii_count++;
       emailCount++;
       const key = `EMAIL${emailCount}`;
-      pii_hashamp[key] = match;
+      pii_hashmap[key] = match;
       return key;
     })
     .replace(phoneRegex, (match) => {
       total_pii_count++;
       phoneCount++;
       const key = `PHONE${phoneCount}`;
-      pii_hashamp[key] = match;
+      pii_hashmap[key] = match;
       return key;
     });
 
-  localStorage.setItem('pii_map', JSON.stringify(pii_hashamp));
+  localStorage.setItem('pii_map', JSON.stringify(pii_hashmap));
   return cleanedString;
+}
+
+async function pii_scrub(text: string): Promise<string> {//Promise<string> {
+  const response = await browser.runtime.sendMessage(
+    { type: 'PROCESS_WITH_LLM', text: text });
+
+  if (response && response.success && response.processedText) {
+    console.log("LLM Response:", response.processedText);
+    updateHashmap(response.processedText);
+    const updatedText = updateText(text);
+    console.log(reverseRedaction(updatedText));
+    return updatedText;
+  }
+  else {
+    const errorMsg = response?.error || "Unknown error running inference with LLM";
+    console.error("Error running inference with LLM:", errorMsg);
+    throw new Error(errorMsg);
+  }
+}
+
+function updateHashmap(response: string) {
+  var responseObj = JSON.parse(response);
+  console.log("JSN OBJ: ", responseObj);
+  for (const pii of responseObj) {
+    if (!piiHashmap[pii.value]) {
+      piiCountHashmap[pii.category] = (piiCountHashmap[pii.category] || 0) + 1;
+      let piiValue = pii.category + piiCountHashmap[pii.category];
+      piiHashmap[pii.value] = piiValue;
+      piiReverseHashmap[piiValue] = pii.value;
+    }
+  }
+  console.log("Count hashmap: ", piiCountHashmap);
+  console.log("PII hashmap: ", piiHashmap, piiReverseHashmap);
+}
+
+function updateText(text: string) {
+  const pattern = new RegExp(Object.keys(piiHashmap).join("|"), "g");
+  const result = text.replace(pattern, (matched) => piiHashmap[matched]);
+  return result;
+}
+
+function reverseRedaction(text: string) {
+  const pattern = new RegExp(Object.keys(piiReverseHashmap).join("|"), "g");
+  const result = text.replace(pattern, (matched) => piiReverseHashmap[matched]);
+  return result;
 }

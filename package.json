@@ -17,6 +17,7 @@
   "dependencies": {
     "@mantine/core": "^8.3.14",
     "@mantine/hooks": "^8.3.14",
+    "@mlc-ai/web-llm": "^0.2.80",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
   },
