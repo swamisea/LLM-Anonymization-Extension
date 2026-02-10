@@ -1,118 +1,95 @@
-import { browser } from 'wxt/browser';
-
 let lastKeyPressTime = 0;
 let lastPressedKey = "";
-const DOUBLE_PRESS_THRESHOLD = 500; // This is the threshold between key presses (500ms)
-const pii_hashmap: Record<string, string> = {};
-const piiCountHashmap: Record<string, number> = {};
-const piiHashmap: Record<string, string> = {};
-const piiReverseHashmap: Record<string, string> = {};
-let total_pii_count = 0;
-let emailCount = 0;
-let phoneCount = 0;
+const DOUBLE_PRESS_THRESHOLD = 500; // threshold between key presses (500ms)
+let rehydrationTimeout: number | null = null;
+const REHYDRATION_DELAY = 300;
 
 export default defineContentScript({
   matches: ["https://gemini.google.com/*"],
   main() {
+    // below section deals with the logic to rehydrate the PII in the model responses
+    const observer = new MutationObserver(async (mutations) => {
+      if (rehydrationTimeout) {
+        clearTimeout(rehydrationTimeout);
+      }
+      observer.disconnect();
+      // Schedule rehydration after delay
+      rehydrationTimeout = window.setTimeout(async () => {
+        observer.disconnect();
+
+        // Find all model response paragraphs
+        const containers = document.querySelectorAll('.model-response-text');
+        for (const container of Array.from(containers)) {
+          const paragraphs = container.querySelectorAll('p');
+          for (const p of Array.from(paragraphs)) {
+            if (p.textContent) {
+              const original = p.textContent;
+              const rehydrated = await rehydrateModelResponse(p.textContent);
+              if (original !== rehydrated) {
+                console.log("[CONTENT] Rehydrated model response");
+                p.textContent = rehydrated;
+              }
+            }
+          }
+        }
+
+        start();
+      }, REHYDRATION_DELAY);
+    });
+
+    function start() {
+      observer.observe(document.body, {
+        childList: true,      // detects when <p> tags are added
+        subtree: true,
+        characterData: true,  // Detects when text inside <p> changes when model is streaming content
+      });
+    }
+    start();
+
+    // below section deals with the activation sequence for redaction and the redaction logic 
     window.addEventListener('keydown', async (event) => {
       const currentTime = new Date().getTime();
       const key = event.shiftKey;
       if (event.key === 'Shift') {
         const timeDiff = currentTime - lastKeyPressTime;
-        if (lastPressedKey === 'Shift' && timeDiff < DOUBLE_PRESS_THRESHOLD) // This checks for doublepressing the shift key 
+        if (lastPressedKey === 'Shift' && timeDiff < DOUBLE_PRESS_THRESHOLD) // checks for doublepressing the shift key 
         {
           const target = event.target as HTMLElement;
           const container = target.closest('.text-input-field');
           if (container) {
-            const textInputContent = container.querySelector('p'); // user input content is inside a paragraph tag
-            if (textInputContent) {
-              const originalText = textInputContent.textContent || "";
-              // Modify the text and update the DOM (text input field)
-              const llm_response = await pii_scrub(originalText);
-              textInputContent.textContent = llm_response;
-              //textInputContent.textContent = transformText(originalText);
-              lastPressedKey = "";
-              lastKeyPressTime = 0;
-              return;
+            const textInputContents = container.querySelectorAll('p'); // user input content is inside a paragraph tag
+            for (const textInputContent of Array.from(textInputContents)) {
+              if (textInputContent) {
+                const originalText = textInputContent.textContent || "";
+                // modify text and update DOM (text input field)
+                textInputContent.textContent = await redactText(originalText); // redacted text
+                console.log("[CONTENT] Redacted user input");
+                lastPressedKey = "";
+                lastKeyPressTime = 0;
+                return;
+              }
             }
+
           }
         }
         lastPressedKey = "Shift";
         lastKeyPressTime = currentTime;
       } else {
-        // Reset key if subsequent press is not Shift key
+        // reset key if subsequent press is not Shift key
         lastPressedKey = "";
       }
-    }, true); // Capture phase is critical here
+    }, true); // capture phase is critical here
   }
 });
 
-function transformText(text: string): string {
-  // Scrubbing a specific word or adding a prefix
-  const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/gi;
-  const phoneRegex = /\b\d{3}[-.]?\d{3}[-.]?\d{4}\b/gi;
-
-  const cleanedString = text
-    .replace(emailRegex, (match) => {
-      total_pii_count++;
-      emailCount++;
-      const key = `EMAIL${emailCount}`;
-      pii_hashmap[key] = match;
-      return key;
-    })
-    .replace(phoneRegex, (match) => {
-      total_pii_count++;
-      phoneCount++;
-      const key = `PHONE${phoneCount}`;
-      pii_hashmap[key] = match;
-      return key;
-    });
-
-  localStorage.setItem('pii_map', JSON.stringify(pii_hashmap));
-  return cleanedString;
-}
-
-async function pii_scrub(text: string): Promise<string> {//Promise<string> {
+async function redactText(text: string): Promise<string> {
   const response = await browser.runtime.sendMessage(
-    { type: 'PROCESS_WITH_LLM', text: text });
-
-  if (response && response.success && response.processedText) {
-    console.log("LLM Response:", response.processedText);
-    updateHashmap(response.processedText);
-    const updatedText = updateText(text);
-    console.log(reverseRedaction(updatedText));
-    return updatedText;
-  }
-  else {
-    const errorMsg = response?.error || "Unknown error running inference with LLM";
-    console.error("Error running inference with LLM:", errorMsg);
-    throw new Error(errorMsg);
-  }
+    { type: 'REDACT', text: text });
+  return response;
 }
 
-function updateHashmap(response: string) {
-  var responseObj = JSON.parse(response);
-  console.log("JSN OBJ: ", responseObj);
-  for (const pii of responseObj) {
-    if (!piiHashmap[pii.value]) {
-      piiCountHashmap[pii.category] = (piiCountHashmap[pii.category] || 0) + 1;
-      let piiValue = pii.category + piiCountHashmap[pii.category];
-      piiHashmap[pii.value] = piiValue;
-      piiReverseHashmap[piiValue] = pii.value;
-    }
-  }
-  console.log("Count hashmap: ", piiCountHashmap);
-  console.log("PII hashmap: ", piiHashmap, piiReverseHashmap);
-}
-
-function updateText(text: string) {
-  const pattern = new RegExp(Object.keys(piiHashmap).join("|"), "g");
-  const result = text.replace(pattern, (matched) => piiHashmap[matched]);
-  return result;
-}
-
-function reverseRedaction(text: string) {
-  const pattern = new RegExp(Object.keys(piiReverseHashmap).join("|"), "g");
-  const result = text.replace(pattern, (matched) => piiReverseHashmap[matched]);
-  return result;
+async function rehydrateModelResponse(text: string): Promise<string> {
+  const response = await browser.runtime.sendMessage(
+    { type: 'REHYDRATE', text: text });
+  return response;
 }

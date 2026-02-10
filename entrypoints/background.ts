@@ -1,70 +1,81 @@
-import systemPrompt from '@/assets/prompt.md?raw';
-
-const OFFSCREEN_DOCUMENT_PATH = '/offscreen.html';
-declare const self: ServiceWorkerGlobalScope;
+const piiCountHashmap: Record<string, number> = {};
+const piiHashmap: Record<string, string> = {};
+const piiReverseHashmap: Record<string, string> = {};
 
 export default defineBackground(() => {
-  // Create offscreen document if it doesn't exist
-  setupOffscreenDocument(OFFSCREEN_DOCUMENT_PATH);
-
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    handleMessages(message, sender, sendResponse, systemPrompt);
+    switch (message.type) {
+      case "REDACT":
+        const redactResponse = transformText(message.text);
+        sendResponse(redactResponse);
+        break;
+      case "REHYDRATE":
+        const rehydResponse = rehydratePII(message.text);
+        sendResponse(rehydResponse);
+        break;
+      case "GET_PII_STATS":
+        sendResponse(piiCountHashmap);
+        break;
+      default:
+        console.log("Invalid message type");
+    }
     return true; // Response sent async
   });
 });
 
-const handleMessages = async (message: any, sender: any, sendResponse: (res: any) => void, systemPrompt: string) => {
-  if (message.type === "PROCESS_WITH_LLM") {
-    try {
-      await setupOffscreenDocument(OFFSCREEN_DOCUMENT_PATH)
-      // Forward message to offscreen document
-      browser.runtime.sendMessage({
-        type: 'PROCESS_WITH_LLM_OFFSCREEN',
-        text: message.text,
-        systemPrompt: systemPrompt
-      }).then((response) => {
-        sendResponse(response);
-      });
-    } catch (error) {
-      sendResponse({ success: false, error: String(error) });
-    }
-  }
-};
+// PII Redaction function
+// Supported PII: email, phone number, SSN, IpV4 address, Credit card
+function transformText(text: string): string {
+  console.log(text);
+  // Scrubbing a specific word or adding a prefix
+  const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/gi;
+  const phoneRegex = /\b\d{3}[-.]?\d{3}[-.]?\d{4}\b/g;
+  const ssnRegex = /\b(?!000|666|9\d{2})\d{3}?-(?!00)\d{2}?-(?!0{4})\d{4}\b/g;
+  const ipAddRegex = /\b(25[0-5]|2[0-4]\d|1?\d{1,2})(\.(25[0-5]|2[0-4]\d|1?\d{1,2})){3}\b/gi;
+  const ccRegex = /\b(?:4\d{3}|5[1-5]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))\d{0,12}(?:[\s-]?\d{4}){0,3}\b/g; //TODO: Add support for AMEX cards
 
-let creating: Promise<void> | null = null;
-async function setupOffscreenDocument(path: string) {
-  // 1. Check if it already exists in the browser's eyes
-  const existingContexts = await browser.runtime.getContexts({
-    contextTypes: ['OFFSCREEN_DOCUMENT'],
-    documentUrls: [browser.runtime.getURL('/offscreen.html')]
-  });
+  const cleanedString = text
+    .replace(emailRegex, (match) => {
+      return replaceUpdateInput(match, 'email');
+    })
+    .replace(phoneRegex, (match) => {
+      return replaceUpdateInput(match, 'phone');
+    })
+    .replace(ssnRegex, (match) => {
+      return replaceUpdateInput(match, 'ssn');
+    })
+    .replace(ipAddRegex, (match) => {
+      return replaceUpdateInput(match, 'ip_address');
+    })
+    .replace(ccRegex, (match) => {
+      return replaceUpdateInput(match, 'credit_card');
+    });
 
-  if (existingContexts.length > 0) {
-    return;
-  }
-
-  // 2. Handle the "In Progress" lock
-  if (creating) {
-    await creating;
-    return;
-  }
-
-  // 3. Create and store the promise immediately
-  creating = browser.offscreen.createDocument({
-    url: path,
-    reasons: [browser.offscreen.Reason.DOM_SCRAPING], // Use the enum if possible
-    justification: 'Inference with WebLLM requires DOM access',
-  });
-
-  try {
-    await creating;
-  } catch (err) {
-    creating = null; // Reset if creation fails so we can try again
-    throw err;
-  }
+  return cleanedString;
 }
 
-async function hasOffscreenDocument(path: string) {
-  const matchedClients = await self.clients.matchAll();
-  return matchedClients.some((c: any) => c.url.endsWith(path));
+function replaceUpdateInput(matchText: string, type: string) {
+  if (!piiHashmap[matchText]) {
+    piiCountHashmap[type] = (piiCountHashmap[type] || 0) + 1;
+    const key = `${type.toUpperCase()}${piiCountHashmap[type]}`;
+    piiHashmap[matchText] = key;
+    piiReverseHashmap[key] = matchText;
+
+    // notify UI of the update
+    browser.runtime.sendMessage({ type: 'PII_COUNT_UPDATED' }).catch(() => {
+      console.log("IGNORE: Error due to popup not being open during pii count update");
+    });
+
+    return key;
+  }
+  return piiHashmap[matchText];
+}
+
+function rehydratePII(text: string) {
+  console.log("Came into regydration");
+  console.log(piiReverseHashmap);
+  console.log(text);
+  const pattern = new RegExp(Object.keys(piiReverseHashmap).join("|"), "g");
+  const result = text.replace(pattern, (matched) => piiReverseHashmap[matched]);
+  return result;
 }
