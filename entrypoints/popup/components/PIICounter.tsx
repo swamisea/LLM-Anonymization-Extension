@@ -7,13 +7,24 @@ export default function PIICounter() {
     const [currCustomPII, setCurrCustomPII] = useState<string[]>([]);
     const [customPII, setCustomPII] = useState<string[]>([]);
     const [llmMode, setLLMMode] = useState<boolean>(false);
-    const [llmInstructs, setLLMInstructs] = useState<string[]>([])
+    const [llmInstructs, setLLMInstructs] = useState<string>("");
 
     const fetchPIICount = useCallback(() => {
         browser.runtime.sendMessage({ type: 'GET_PII_STATS' })
             .then(setPiiData)
             .catch(console.error);
     }, []);
+
+    const llmRedaction = useCallback(async () => {
+        try {
+            await browser.runtime.sendMessage({ type: 'SET_LLM_INSTRUCTS', rules: llmInstructs });
+            console.log("LLM Rules updated in background");
+        } catch (error) {
+            console.error("Error updating rules:", error);
+        } finally {
+            getLLMInstructs();
+        }
+    }, [llmInstructs]);
 
     const getCustomPII = useCallback(() => {
         browser.runtime.sendMessage({ type: 'GET_CUSTOM_PII' })
@@ -25,10 +36,26 @@ export default function PIICounter() {
             .catch(console.error);
     }, []);
 
+    const getLLMInstructs = useCallback(() => {
+        browser.runtime.sendMessage({ type: 'GET_LLM_INSTRUCTS' })
+            .then((response) => {
+                if (response.success && response.LLMInstructs) {
+                    setLLMInstructs(response.LLMInstructs);
+                }
+            })
+            .catch(console.error);
+    }, []);
+
     useEffect(() => {
         // Fetch initial data on mount
         fetchPIICount();
+        browser.runtime.sendMessage({ type: 'GET_LLM_MODE' })
+            .then(res => setLLMMode(res.enabled))
+            .catch(console.error);
         getCustomPII();
+        if (llmMode) {
+            getLLMInstructs()
+        }
 
         // handler that makes the backend call
         const handleMessage = (message: any) => {
@@ -205,7 +232,11 @@ export default function PIICounter() {
                 </Stack>
                 <Switch
                     checked={llmMode}
-                    onChange={(event) => setLLMMode(event.currentTarget.checked)}
+                    onChange={(event) => {
+                        const enabled = event.currentTarget.checked;
+                        setLLMMode(enabled);
+                        browser.runtime.sendMessage({ type: 'TOGGLE_LLM_MODE', enabled });
+                    }}
                     color="#22c984"
                     withThumbIndicator={false}
                     onLabel="ON"
@@ -225,9 +256,9 @@ export default function PIICounter() {
                                 color: "#6b7a96"
                             },
                         }}
-                        placeholder="Enter custom keywords here"
+                        placeholder="Enter custom redaction rules (e.g. Redact all names)"
                         value={llmInstructs}
-                        onChange={(event) => setLLMInstructs([...llmInstructs, event.currentTarget.value])}
+                        onChange={(event) => setLLMInstructs(event.currentTarget.value)}
                     />
                     <Button
                         ml="lg"
@@ -238,9 +269,31 @@ export default function PIICounter() {
                         fz="xs"
                         ff="DM Mono"
                         c="#0f1117"
+                        onClick={llmRedaction}
                     >
                         Apply Rule
                     </Button>
+                    <Group
+                        gap="xs"
+                        mt="0"
+                        ml="xs"
+                        mr="xs"
+                    >
+                        {llmInstructs && (
+                            llmInstructs.split('\n').map((instruct, index) => (
+                                <Pill
+                                    key={index}
+                                    withRemoveButton
+                                    bg="rgba(34,201,132,0.12)"
+                                    bd="1px solid rgba(34,201,132,0.25)"
+                                    size="sm"
+                                    c="#22c984"
+                                >
+                                    {instruct}
+                                </Pill>
+                            ))
+                        )}
+                    </Group>
                 </Stack>
             )}
 

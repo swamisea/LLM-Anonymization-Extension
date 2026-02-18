@@ -1,7 +1,26 @@
+import { CreateMLCEngine, MLCEngine } from "@mlc-ai/web-llm";
+
 const piiCountHashmap: Record<string, number> = {};
 const piiHashmap: Record<string, string> = {};
 const piiReverseHashmap: Record<string, string> = {};
 let customPII: Set<string> = new Set();
+let llmInstructs: string = "";
+let llmMode: boolean = false;
+let offscreenPromise: Promise<void> | null = null;
+//let systemPrompt: string | null = null;
+const systemPrompt: string = `**Role:** You are a strict Redaction Engine. Your job is to process input text and remove specific information based *only* on the rules provided by the user.
+
+**Operational Constraints:**
+1. **Strict Fidelity:** Do not change, rewrite, or correct the input text. No summarization or formatting changes are permitted.
+2. **Exclusivity:** Only redact items that fall under the user's defined rules. Do not apply "common sense" redactions.
+3. **Format:** You must output a single, valid JSON object. No text before or after.
+4. Replace each occurrence of redacted words with '[REDACTED]' in the redacted_string field.
+
+**Output Format:**
+{"elements": ["exact strings that were redacted"], "redacted_string": "full text with redactions applied"}
+
+**Instruction:**
+Awaiting user rules and input text.`
 
 export default defineBackground(() => {
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -28,6 +47,39 @@ export default defineBackground(() => {
           customPII: Array.from(getCustomPIIResponse)
         });
         break;
+      case "GET_LLM_INSTRUCTS":
+        const getLLMInstructsResponse = getLLMInstruct();
+        sendResponse({
+          success: true,
+          LLMInstructs: getLLMInstructsResponse
+        });
+        break;
+      case "SET_LLM_INSTRUCTS":
+        llmInstructs = message.rules;
+        sendResponse({ success: true });
+        break;
+      case "TOGGLE_LLM_MODE":
+        llmMode = message.enabled;
+        sendResponse({ success: true });
+        break;
+      case "GET_LLM_MODE":
+        sendResponse({ success: true, enabled: llmMode });
+        break;
+      case "LLM_REDACTION":
+        llmRedaction(message.input, message.modelName, message.userRules)
+          .then(response => {
+            sendResponse({
+              success: true,
+              response: response
+            });
+          })
+          .catch(error => {
+            sendResponse({
+              success: false,
+              error: error.message
+            });
+          });
+        return true; // Keep channel open for async response
       default:
         console.log("Invalid message type");
         break;
@@ -108,6 +160,10 @@ function getCustomPII() {
   return customPII;
 }
 
+function getLLMInstruct() {
+  return llmInstructs;
+}
+
 function escapeSpecialChars(text: string) {
   return text.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
 }
@@ -117,4 +173,77 @@ function customPII2Regex() {
   const strPattern = escCustomPII.join('|');
   console.log("string pattern of the regex: ", strPattern);
   return new RegExp(strPattern, 'gi');
+}
+
+async function setupOffscreenDocument(path: string) {
+  // Check if offscreen document already exists
+  const existingContexts = await browser.runtime.getContexts({
+    contextTypes: ['OFFSCREEN_DOCUMENT' as any],
+  });
+
+  if (existingContexts.length > 0) {
+    return;
+  }
+
+  // Create offscreen document
+  if (offscreenPromise) {
+    await offscreenPromise;
+    return;
+  }
+
+  offscreenPromise = chrome.offscreen.createDocument({
+    url: path,
+    reasons: [chrome.offscreen.Reason.DOM_PARSER],
+    justification: "Running LLM inference using Web-LLM which requires a DOM environment.",
+  });
+
+  await offscreenPromise;
+  offscreenPromise = null;
+}
+
+async function llmRedaction(input: string, modelName: string, userRules: string) {
+  try {
+    await setupOffscreenDocument('offscreen.html');
+
+    // if (!systemPrompt) {
+    //   const url = chrome.runtime.getURL('assets/prompt.md');
+    //   systemPrompt = await fetch(url).then(r => r.text());
+    // }
+
+    if (userRules && !llmInstructs.split('\n').includes(userRules)) {
+      llmInstructs = llmInstructs ? `${llmInstructs}\n${userRules}` : userRules;
+    }
+    const activeRules = llmInstructs;
+    const response = await browser.runtime.sendMessage({
+      type: 'PROCESS_WITH_LLM_OFFSCREEN',
+      text: input,
+      systemPrompt,
+      userRules: activeRules,
+      modelName
+    });
+
+    if (response && response.success) {
+      console.log(response.processedText);
+      const responseObj = JSON.parse(response.processedText);
+      const elementsArray = [...new Set(responseObj["elements"])] as string[];
+
+      let keyedRedactedString = input;
+      for (const element of elementsArray) {
+        if (!element) continue;
+        const elementRegex = new RegExp(escapeSpecialChars(element), 'gi');
+        keyedRedactedString = keyedRedactedString.replace(elementRegex, (match) => {
+          return replaceUpdateInput(match, 'llm_redaction');
+        });
+      }
+
+      console.log("Elements tracked:", elementsArray);
+      console.log("Keyed string:", keyedRedactedString);
+      return keyedRedactedString;
+    } else {
+      throw new Error(response?.error || `Error performing LLM redaction with ${modelName}`);
+    }
+  } catch (error) {
+    console.error("Background LLM processing error:", error);
+    throw error;
+  }
 }
