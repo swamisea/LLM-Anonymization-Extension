@@ -13,11 +13,11 @@ export default defineContentScript({
         clearTimeout(rehydrationTimeout);
       }
       observer.disconnect();
-      // Schedule rehydration after delay
+      // schedule rehydration after delay
       rehydrationTimeout = window.setTimeout(async () => {
         observer.disconnect();
 
-        // Find all model response paragraphs
+        // find all model response paragraphs
         const containers = document.querySelectorAll('.model-response-text');
         for (const container of Array.from(containers)) {
           const paragraphs = container.querySelectorAll('p');
@@ -91,7 +91,7 @@ export default defineContentScript({
       }
     }, true); // capture phase is critical here
 
-    // Listen for messages from the background
+    // listen for messages from the background
     browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (message.type === 'GET_INPUT_TEXT') {
         const inputField = document.querySelector('.text-input-field p');
@@ -100,7 +100,7 @@ export default defineContentScript({
         const inputField = document.querySelector('.text-input-field p');
         if (inputField) {
           inputField.textContent = message.text;
-          // Trigger an input event so Gemini knows the content changed
+          // trigger an input event so Gemini knows the content changed
           inputField.dispatchEvent(new Event('input', { bubbles: true }));
           sendResponse({ success: true });
         } else {
@@ -122,7 +122,7 @@ async function llmRedactText(text: string): Promise<string> {
     type: 'LLM_REDACTION',
     input: text,
     modelName: "Llama-3.1-8B-Instruct",
-    userRules: "" // Background will use its stored rules if empty
+    userRules: "" // background will use its stored rules if empty
   });
   return response.response || text;
 }

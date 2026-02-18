@@ -21,7 +21,7 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
         processWithLLM(message.text, message.systemPrompt, message.userRules)
             .then(response => sendResponse({ success: true, processedText: response }))
             .catch(error => sendResponse({ success: false, error: error.message }));
-        return true; // Keep the message channel open for async response
+        return true; // keep the message channel open for async response
     }
 });
 

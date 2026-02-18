@@ -1,4 +1,11 @@
-import { CreateMLCEngine, MLCEngine } from "@mlc-ai/web-llm";
+// 
+const STORAGE_KEYS = {
+  PII_COUNT: 'piiCountHashmap',
+  PII_MAP: 'piiHashmap',
+  PII_REVERSE_MAP: 'piiReverseHashmap',
+  CUSTOM_PII: 'customPII',
+  LLM_INSTRUCTS: 'llmInstructs',
+};
 
 const piiCountHashmap: Record<string, number> = {};
 const piiHashmap: Record<string, string> = {};
@@ -7,7 +14,6 @@ let customPII: Set<string> = new Set();
 let llmInstructs: string = "";
 let llmMode: boolean = false;
 let offscreenPromise: Promise<void> | null = null;
-//let systemPrompt: string | null = null;
 const systemPrompt: string = `**Role:** You are a strict Redaction Engine. Your job is to process input text and remove specific information based *only* on the rules provided by the user.
 
 **Operational Constraints:**
@@ -22,7 +28,37 @@ const systemPrompt: string = `**Role:** You are a strict Redaction Engine. Your 
 **Instruction:**
 Awaiting user rules and input text.`
 
-export default defineBackground(() => {
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleSave() {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => pushToStorage(), 500);
+}
+
+async function pushToStorage() {
+  await chrome.storage.local.set({
+    [STORAGE_KEYS.PII_COUNT]: piiCountHashmap,
+    [STORAGE_KEYS.PII_MAP]: piiHashmap,
+    [STORAGE_KEYS.PII_REVERSE_MAP]: piiReverseHashmap,
+    [STORAGE_KEYS.CUSTOM_PII]: Array.from(customPII),
+    [STORAGE_KEYS.LLM_INSTRUCTS]: llmInstructs,
+  });
+}
+
+async function loadFromStorage() {
+  const data = await chrome.storage.local.get(Object.values(STORAGE_KEYS));
+  Object.assign(piiCountHashmap, data[STORAGE_KEYS.PII_COUNT] ?? {});
+  Object.assign(piiHashmap, data[STORAGE_KEYS.PII_MAP] ?? {});
+  Object.assign(piiReverseHashmap, data[STORAGE_KEYS.PII_REVERSE_MAP] ?? {});
+  customPII = new Set<string>((data[STORAGE_KEYS.CUSTOM_PII] as string[]) ?? []);
+  llmInstructs = data[STORAGE_KEYS.LLM_INSTRUCTS] as string ?? '';
+}
+
+
+export default defineBackground(async () => {
+  // fetching existing mappings, custom keywords and rules from browser storage
+  await loadFromStorage();
+
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     switch (message.type) {
       case "REDACT":
@@ -56,6 +92,7 @@ export default defineBackground(() => {
         break;
       case "SET_LLM_INSTRUCTS":
         llmInstructs = message.rules;
+        scheduleSave();
         sendResponse({ success: true });
         break;
       case "TOGGLE_LLM_MODE":
@@ -138,7 +175,7 @@ function replaceUpdateInput(matchText: string, type: string) {
     browser.runtime.sendMessage({ type: 'PII_COUNT_UPDATED' }).catch(() => {
       console.log("IGNORE: Error due to popup not being open during pii count update");
     });
-
+    scheduleSave();
     return key;
   }
   return piiHashmap[matchText];
@@ -154,6 +191,7 @@ function rehydratePII(text: string) {
 
 function addCustomPII(customList: string[]) {
   customList.forEach(item => customPII.add(item));
+  scheduleSave();
 }
 
 function getCustomPII() {
@@ -204,12 +242,6 @@ async function setupOffscreenDocument(path: string) {
 async function llmRedaction(input: string, modelName: string, userRules: string) {
   try {
     await setupOffscreenDocument('offscreen.html');
-
-    // if (!systemPrompt) {
-    //   const url = chrome.runtime.getURL('assets/prompt.md');
-    //   systemPrompt = await fetch(url).then(r => r.text());
-    // }
-
     if (userRules && !llmInstructs.split('\n').includes(userRules)) {
       llmInstructs = llmInstructs ? `${llmInstructs}\n${userRules}` : userRules;
     }

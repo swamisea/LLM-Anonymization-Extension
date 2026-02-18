@@ -1,4 +1,4 @@
-import { TagsInput, Group, Stack, Text, Badge, Divider, Center, Box, SimpleGrid, UnstyledButton, Button, ScrollArea, Tooltip, Accordion, PillGroup, Pill, Image, Indicator, Flex, Switch, TextInput, Textarea, Anchor } from "@mantine/core";
+import { TagsInput, Group, Stack, Text, Badge, Divider, Box, SimpleGrid, Button, ScrollArea, Pill, Image, Switch, Textarea, Anchor } from "@mantine/core";
 import { useState, useCallback, useEffect } from "react";
 import shieldsvg from '/shield.svg';
 
@@ -47,7 +47,7 @@ export default function PIICounter() {
     }, []);
 
     useEffect(() => {
-        // Fetch initial data on mount
+        // fetch initial data on mount
         fetchPIICount();
         browser.runtime.sendMessage({ type: 'GET_LLM_MODE' })
             .then(res => setLLMMode(res.enabled))
@@ -63,7 +63,7 @@ export default function PIICounter() {
                 fetchPIICount();
             }
         };
-        // Add listener for updates from backend for pii counts
+        // add listener for updates from backend for pii counts
         browser.runtime.onMessage.addListener(handleMessage);
     }, [fetchPIICount, getCustomPII]);
 
@@ -71,8 +71,8 @@ export default function PIICounter() {
         browser.runtime.sendMessage({ type: 'ADD_CUSTOM_PII', customPII: currCustomPII })
             .then(() => {
                 console.log("Custom PII added:", currCustomPII);
-                setCurrCustomPII([]); // Clear the input field
-                getCustomPII(); // Refresh from backend to stay in sync
+                setCurrCustomPII([]); // clear the input field
+                getCustomPII(); // refresh from backend to stay in sync
             })
             .catch(console.error);
     }, [currCustomPII, getCustomPII]);
@@ -271,7 +271,7 @@ export default function PIICounter() {
                         c="#0f1117"
                         onClick={llmRedaction}
                     >
-                        Apply Rule
+                        Add Rule
                     </Button>
                     <Group
                         gap="xs"
