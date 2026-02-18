@@ -9,13 +9,8 @@ function App() {
   return (
     <Paper
       w={350}
-      h={450}
-      radius="lg"
-      shadow="xl"
-      withBorder
-      p="xl"
-      style={{ overflow: 'hidden' }}
-      bg=""
+      p="0"
+      m="0"
     >
       <PIICounter />
     </Paper>

@@ -1,6 +1,7 @@
 const piiCountHashmap: Record<string, number> = {};
 const piiHashmap: Record<string, string> = {};
 const piiReverseHashmap: Record<string, string> = {};
+let customPII: Set<string> = new Set();
 
 export default defineBackground(() => {
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -16,8 +17,20 @@ export default defineBackground(() => {
       case "GET_PII_STATS":
         sendResponse(piiCountHashmap);
         break;
+      case "ADD_CUSTOM_PII":
+        const addCustomPIIResponse = addCustomPII(message.customPII);
+        sendResponse({ success: true });
+        break;
+      case "GET_CUSTOM_PII":
+        const getCustomPIIResponse = getCustomPII();
+        sendResponse({
+          success: true,
+          customPII: Array.from(getCustomPIIResponse)
+        });
+        break;
       default:
         console.log("Invalid message type");
+        break;
     }
     return true; // Response sent async
   });
@@ -27,14 +40,15 @@ export default defineBackground(() => {
 // Supported PII: email, phone number, SSN, IpV4 address, Credit card
 function transformText(text: string): string {
   console.log(text);
-  // Scrubbing a specific word or adding a prefix
   const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/gi;
   const phoneRegex = /\b\d{3}[-.]?\d{3}[-.]?\d{4}\b/g;
   const ssnRegex = /\b(?!000|666|9\d{2})\d{3}?-(?!00)\d{2}?-(?!0{4})\d{4}\b/g;
   const ipAddRegex = /\b(25[0-5]|2[0-4]\d|1?\d{1,2})(\.(25[0-5]|2[0-4]\d|1?\d{1,2})){3}\b/gi;
   const ccRegex = /\b(?:4\d{3}|5[1-5]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))\d{0,12}(?:[\s-]?\d{4}){0,3}\b/g; //TODO: Add support for AMEX cards
+  const customPIIRegex = customPII2Regex();
+  console.log("custom PII regex: ", customPIIRegex);
 
-  const cleanedString = text
+  let cleanedString = text
     .replace(emailRegex, (match) => {
       return replaceUpdateInput(match, 'email');
     })
@@ -50,6 +64,13 @@ function transformText(text: string): string {
     .replace(ccRegex, (match) => {
       return replaceUpdateInput(match, 'credit_card');
     });
+
+  if (customPII.size > 0) {
+    cleanedString = cleanedString.replace(customPIIRegex, (match) => {
+      return replaceUpdateInput(match, 'custom_pii');
+    });
+  }
+
 
   return cleanedString;
 }
@@ -72,10 +93,28 @@ function replaceUpdateInput(matchText: string, type: string) {
 }
 
 function rehydratePII(text: string) {
-  console.log("Came into regydration");
   console.log(piiReverseHashmap);
   console.log(text);
   const pattern = new RegExp(Object.keys(piiReverseHashmap).join("|"), "g");
   const result = text.replace(pattern, (matched) => piiReverseHashmap[matched]);
   return result;
+}
+
+function addCustomPII(customList: string[]) {
+  customList.forEach(item => customPII.add(item));
+}
+
+function getCustomPII() {
+  return customPII;
+}
+
+function escapeSpecialChars(text: string) {
+  return text.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+}
+
+function customPII2Regex() {
+  const escCustomPII = Array.from(customPII, (text) => escapeSpecialChars(text));
+  const strPattern = escCustomPII.join('|');
+  console.log("string pattern of the regex: ", strPattern);
+  return new RegExp(strPattern, 'gi');
 }
