@@ -1,9 +1,13 @@
-import { Button, Group, Stack, Text, Title, Badge, Divider, ThemeIcon, Paper, Center, Box, SimpleGrid, UnstyledButton } from "@mantine/core";
+import { TagsInput, Group, Stack, Text, Badge, Divider, Box, SimpleGrid, Button, ScrollArea, Pill, Image, Switch, Textarea, Anchor } from "@mantine/core";
 import { useState, useCallback, useEffect } from "react";
-import shieldImg from '@/assets/shield.png';
+import shieldsvg from '/shield.svg';
 
 export default function PIICounter() {
     const [piiData, setPiiData] = useState<Record<string, number>>({});
+    const [currCustomPII, setCurrCustomPII] = useState<string[]>([]);
+    const [customPII, setCustomPII] = useState<string[]>([]);
+    const [llmMode, setLLMMode] = useState<boolean>(false);
+    const [llmInstructs, setLLMInstructs] = useState<string>("");
 
     const fetchPIICount = useCallback(() => {
         browser.runtime.sendMessage({ type: 'GET_PII_STATS' })
@@ -11,9 +15,47 @@ export default function PIICounter() {
             .catch(console.error);
     }, []);
 
+    const llmRedaction = useCallback(async () => {
+        try {
+            await browser.runtime.sendMessage({ type: 'SET_LLM_INSTRUCTS', rules: llmInstructs });
+            console.log("LLM Rules updated in background");
+        } catch (error) {
+            console.error("Error updating rules:", error);
+        } finally {
+            getLLMInstructs();
+        }
+    }, [llmInstructs]);
+
+    const getCustomPII = useCallback(() => {
+        browser.runtime.sendMessage({ type: 'GET_CUSTOM_PII' })
+            .then((response) => {
+                if (response.success && response.customPII) {
+                    setCustomPII(Array.from(response.customPII));
+                }
+            })
+            .catch(console.error);
+    }, []);
+
+    const getLLMInstructs = useCallback(() => {
+        browser.runtime.sendMessage({ type: 'GET_LLM_INSTRUCTS' })
+            .then((response) => {
+                if (response.success && response.LLMInstructs) {
+                    setLLMInstructs(response.LLMInstructs);
+                }
+            })
+            .catch(console.error);
+    }, []);
+
     useEffect(() => {
-        // only runs on mount
-        fetchPIICount()
+        // fetch initial data on mount
+        fetchPIICount();
+        browser.runtime.sendMessage({ type: 'GET_LLM_MODE' })
+            .then(res => setLLMMode(res.enabled))
+            .catch(console.error);
+        getCustomPII();
+        if (llmMode) {
+            getLLMInstructs()
+        }
 
         // handler that makes the backend call
         const handleMessage = (message: any) => {
@@ -21,75 +63,253 @@ export default function PIICounter() {
                 fetchPIICount();
             }
         };
-        // Add listener for updates from backend for pii counts
-        browser.runtime.onMessage.addListener(handleMessage)
-    }, [fetchPIICount]);
+        // add listener for updates from backend for pii counts
+        browser.runtime.onMessage.addListener(handleMessage);
+    }, [fetchPIICount, getCustomPII]);
+
+    const addCustomPII = useCallback(() => {
+        browser.runtime.sendMessage({ type: 'ADD_CUSTOM_PII', customPII: currCustomPII })
+            .then(() => {
+                console.log("Custom PII added:", currCustomPII);
+                setCurrCustomPII([]); // clear the input field
+                getCustomPII(); // refresh from backend to stay in sync
+            })
+            .catch(console.error);
+    }, [currCustomPII, getCustomPII]);
 
     const totalCount = Object.values(piiData).reduce((sum, count) => sum + count, 0);
 
     return (
-        <Stack gap="lg">
-            <div>
-                <Text
-                    size="xl"
-                    fw={900}
-                    variant="gradient"
-                    gradient={{ from: 'teal', to: 'green', deg: 90 }}
-                    ta="center"
-                >
-                    PII Dashboard
-                </Text>
-                <Text size="xs" c="dimmed" ta="center">
-                    Track the type and number of PII that have been redacted from your inputs
-                </Text>
-            </div>
+        <Stack gap="xs" bg="#0f1117" w="100%" h="100%">
+            <Group m="sm" justify="space-between">
+                <Group gap="xs">
+                    <Image
+                        src={shieldsvg}
+                        w="30"
+                        h="30"
+                        fit="contain"
+                        p="5"
+                        radius="md"
+                        style={{
+                            background: "rgba(34, 201, 132, 0.1)",
+                        }}
+                    />
+                    <Text
+                        fw={700}
+                        c="#22c984"
+                        ff="DM Mono"
+                    >
+                        PIIShield
+                    </Text>
+                </Group>
+                <Box bg="rgba(34, 201, 132, 0.1)" style={{
+                    borderRadius: 999,
+                    padding: "4px 10px",
+                    border: "1px solid rgba(34,201,132,0.25)"
+                }}>
+                    <Group align="center" gap="3" fz="sm">
+                        <Box
+                            style={{
+                                width: 5,
+                                height: 5,
+                                borderRadius: "50%",
+                                background: "#22c984",
+                                animation: "pulse 1.5s infinite",
+                            }}
+                        /><span style={{ color: "#22c984", fontSize: 12 }}>{totalCount}</span> <span style={{ color: "#6b7a96", fontSize: 10 }}>redacted</span>
+                        {llmMode && (
+                            <Group gap="3">
+                                <Box
+                                    style={{
+                                        width: 3,
+                                        height: 3,
+                                        borderRadius: "50%",
+                                        background: "#22c984"
+                                    }}
+                                />
+                                <Text ff="DM Mono" style={{ color: "#22c984", fontSize: 10 }}>LLM</Text>
+                            </Group>
+                        )}
 
-            <Center>
+                    </Group>
+                </Box>
+            </Group>
+            <Divider color="#252d3d" />
+            <Text ff="DM Sans" fz="10" c="#6b7a96" ml="sm" fw="700">DETECTION BREAKDOWN</Text>
+            <ScrollArea type="never" mah="125">
+                <SimpleGrid ml="xs" mr="xs" mb="xs" cols={2} spacing="xs">
+                    {Object.entries(piiData).map(([name, count]) => (
+                        <Box
+                            key={name}
+                            p="sm"
+                            style={{
+                                borderRadius: '8px',
+                                border: '1px solid #252d3d',
+                                backgroundColor: '#171B23',
+                                transition: 'transform 0.1s ease, box-shadow 0.1s ease',
+                            }}
+                            className="pii-button"
+                        >
+                            <Group justify="space-between" wrap="nowrap" c="#e8edf5">
+                                <Text ff="DM Sans" size="xs" fw={600} style={{ textTransform: 'capitalize' }}>
+                                    {name}
+                                </Text>
+                                <Badge variant="filled" color="rgba(26,79,214,0.18)" c="#a8c4ff" size="sm" bd="1px solid #a8c4ff">
+                                    {count}
+                                </Badge>
+                            </Group>
+                        </Box>
+                    ))}
+                </SimpleGrid>
+            </ScrollArea>
+            <Divider ml="md" mr="md" color="#252d3d" />
+            <Text ff="DM Sans" fz="10" c="#6b7a96" ml="sm" fw="700">CUSTOM KEYWORDS</Text>
+            <Group
+                align="center"
+                justify="center"
+                mb="0"
+                m="xs"
+                gap="xs"
+            >
+                <TagsInput
+                    ff="DM Mono"
+                    c="#6b7a96"
+                    style={{ flex: 9 }}
+                    styles={{
+                        input: {
+                            backgroundColor: "#171B23",
+                            border: "1.5px solid #252d3d",
+                            fontSize: 12,
+                            color: "#6b7a96"
+                        },
+                        pill: {
+                            backgroundColor: "#171B23",
+                            border: "1.5px solid #252d3d",
+                            color: "#6b7a96",
+                        }
+                    }}
+                    value={currCustomPII}
+                    onChange={setCurrCustomPII}
+                    placeholder="Enter custom keywords here"
+                />
+                <Button
+                    radius="8"
+                    bg="#22c984"
+                    fz="xs"
+                    style={{ flex: 1 }}
+                    ff="DM Mono"
+                    c="#0f1117"
+                    onClick={addCustomPII}
+                >
+                    Save
+                </Button>
+            </Group>
+            <Group
+                gap="xs"
+                mt="0"
+                ml="xs"
+                mr="xs"
+            >
+                {customPII && (
+                    customPII.map((keyword) => (
+                        <Pill
+                            withRemoveButton
+                            bg="rgba(34,201,132,0.12)"
+                            bd="1px solid rgba(34,201,132,0.25)"
+                            size="sm"
+                            c="#22c984"
+                        >
+                            {keyword}
+                        </Pill>
+                    ))
+                )}
+            </Group>
+            <Divider ml="md" mr="md" color="#252d3d" />
+            <Group justify="space-between" ml="xs" mr="xs">
+                <Stack gap="0">
+                    <Text ff="DM Sans" fz="10" c="#6b7a96" ml="sm" fw="700">LLM MODE</Text>
+                    <Text ff="DM Sans" fz="8" c="#6b7a96" ml="sm" fw="700">Second-pass redaction via custom rule</Text>
+                </Stack>
+                <Switch
+                    checked={llmMode}
+                    onChange={(event) => {
+                        const enabled = event.currentTarget.checked;
+                        setLLMMode(enabled);
+                        browser.runtime.sendMessage({ type: 'TOGGLE_LLM_MODE', enabled });
+                    }}
+                    color="#22c984"
+                    withThumbIndicator={false}
+                    onLabel="ON"
+                    offLabel="OFF"
+                />
+            </Group>
+            {llmMode && (
+                <Stack gap="xs"
+                    ml="xs"
+                    mr="xs">
+                    <Textarea
+                        styles={{
+                            input: {
+                                backgroundColor: "#171B23",
+                                border: "1.5px solid #252d3d",
+                                fontSize: 12,
+                                color: "#6b7a96"
+                            },
+                        }}
+                        placeholder="Enter custom redaction rules (e.g. Redact all names)"
+                        value={llmInstructs}
+                        onChange={(event) => setLLMInstructs(event.currentTarget.value)}
+                    />
+                    <Button
+                        ml="lg"
+                        mr="lg"
+                        size="xs"
+                        radius="8"
+                        bg="#22c984"
+                        fz="xs"
+                        ff="DM Mono"
+                        c="#0f1117"
+                        onClick={llmRedaction}
+                    >
+                        Add Rule
+                    </Button>
+                    <Group
+                        gap="xs"
+                        mt="0"
+                        ml="xs"
+                        mr="xs"
+                    >
+                        {llmInstructs && (
+                            llmInstructs.split('\n').map((instruct, index) => (
+                                <Pill
+                                    key={index}
+                                    withRemoveButton
+                                    bg="rgba(34,201,132,0.12)"
+                                    bd="1px solid rgba(34,201,132,0.25)"
+                                    size="sm"
+                                    c="#22c984"
+                                >
+                                    {instruct}
+                                </Pill>
+                            ))
+                        )}
+                    </Group>
+                </Stack>
+            )}
+
+            <Divider color="#252d3d" />
+            <Group align="center" gap="xs" fz="sm" justify="center" mb="xs">
                 <Box
                     style={{
-                        backgroundImage: `url(${shieldImg})`,
-                        backgroundSize: 'contain',
-                        backgroundRepeat: 'no-repeat',
-                        backgroundPosition: 'center',
-                        width: '60px',
-                        height: '70px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                    }}>
-                    <Text size="xl" fw={900} c="white" ta="center">
-                        {totalCount}
-                    </Text>
-                </Box>
-            </Center>
-
-            <Divider label="Detection Breakdown" labelPosition="center" />
-
-            <SimpleGrid cols={2} spacing="xs">
-                {Object.entries(piiData).map(([name, count]) => (
-                    <UnstyledButton
-                        key={name}
-                        p="sm"
-                        style={{
-                            borderRadius: '8px',
-                            border: '1px solid #e9ecef',
-                            backgroundColor: '#fff',
-                            transition: 'transform 0.1s ease, box-shadow 0.1s ease',
-                        }}
-                        // Add a subtle hover effect to make it feel like a real button
-                        className="pii-button"
-                    >
-                        <Group justify="space-between" wrap="nowrap">
-                            <Text size="xs" fw={600} style={{ textTransform: 'capitalize' }}>
-                                {name}
-                            </Text>
-                            <Badge variant="filled" color="blue" size="sm" circle>
-                                {count}
-                            </Badge>
-                        </Group>
-                    </UnstyledButton>
-                ))}
-            </SimpleGrid>
+                        width: 4,
+                        height: 4,
+                        borderRadius: "50%",
+                        background: "#22c984",
+                        animation: "pulse 2s infinite",
+                    }}
+                /><Text ff="DM Mono" fz="xs" c="#6b7a96"> Issues or feature requests? <Anchor ff="DM Mono" fz="xs" c="#22c984" href="mailto:swaminathanchellappa5@gmail.com" underline="always"> Tell me</Anchor></Text>
+            </Group>
         </Stack>
+
     )
 }

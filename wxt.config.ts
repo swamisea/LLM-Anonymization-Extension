@@ -4,6 +4,14 @@ import { defineConfig } from 'wxt';
 export default defineConfig({
   modules: ['@wxt-dev/module-react'],
   manifest: {
-    permissions: ['offscreen'],
+    permissions: [
+      "offscreen",
+      "storage"],
+    web_accessible_resources: [
+      {
+        resources: ['assets/prompt.md'],
+        matches: ["<all_urls>"]
+      }
+    ]
   },
 });

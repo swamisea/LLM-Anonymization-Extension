@@ -13,11 +13,11 @@ export default defineContentScript({
         clearTimeout(rehydrationTimeout);
       }
       observer.disconnect();
-      // Schedule rehydration after delay
+      // schedule rehydration after delay
       rehydrationTimeout = window.setTimeout(async () => {
         observer.disconnect();
 
-        // Find all model response paragraphs
+        // find all model response paragraphs
         const containers = document.querySelectorAll('.model-response-text');
         for (const container of Array.from(containers)) {
           const paragraphs = container.querySelectorAll('p');
@@ -61,9 +61,20 @@ export default defineContentScript({
             for (const textInputContent of Array.from(textInputContents)) {
               if (textInputContent) {
                 const originalText = textInputContent.textContent || "";
-                // modify text and update DOM (text input field)
-                textInputContent.textContent = await redactText(originalText); // redacted text
-                console.log("[CONTENT] Redacted user input");
+
+                // regex Redaction
+                let redactedTextResult = await regexRedactText(originalText);
+                console.log("[CONTENT] Regex redaction complete");
+
+                // LLM Redaction (if enabled)
+                const { enabled: llmEnabled } = await browser.runtime.sendMessage({ type: 'GET_LLM_MODE' });
+                if (llmEnabled) {
+                  console.log("[CONTENT] LLM Mode active, performing second pass");
+                  redactedTextResult = await llmRedactText(redactedTextResult);
+                  console.log("[CONTENT] LLM redaction complete");
+                }
+
+                textInputContent.textContent = redactedTextResult;
                 lastPressedKey = "";
                 lastKeyPressTime = 0;
                 return;
@@ -79,13 +90,41 @@ export default defineContentScript({
         lastPressedKey = "";
       }
     }, true); // capture phase is critical here
+
+    // listen for messages from the background
+    browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      if (message.type === 'GET_INPUT_TEXT') {
+        const inputField = document.querySelector('.text-input-field p');
+        sendResponse({ text: inputField?.textContent || "" });
+      } else if (message.type === 'SET_INPUT_TEXT') {
+        const inputField = document.querySelector('.text-input-field p');
+        if (inputField) {
+          inputField.textContent = message.text;
+          // trigger an input event so Gemini knows the content changed
+          inputField.dispatchEvent(new Event('input', { bubbles: true }));
+          sendResponse({ success: true });
+        } else {
+          sendResponse({ success: false, error: 'Input field not found' });
+        }
+      }
+    });
   }
 });
 
-async function redactText(text: string): Promise<string> {
+async function regexRedactText(text: string): Promise<string> {
   const response = await browser.runtime.sendMessage(
     { type: 'REDACT', text: text });
   return response;
+}
+
+async function llmRedactText(text: string): Promise<string> {
+  const response = await browser.runtime.sendMessage({
+    type: 'LLM_REDACTION',
+    input: text,
+    modelName: "Llama-3.1-8B-Instruct",
+    userRules: "" // background will use its stored rules if empty
+  });
+  return response.response || text;
 }
 
 async function rehydrateModelResponse(text: string): Promise<string> {
