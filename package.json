@@ -1,8 +1,9 @@
 {
-  "name": "wxt-react-starter",
-  "description": "manifest.json description",
+  "name": "pii-redactor-for-gemini",
+  "displayName": "PII Redactor for Gemini",
+  "description": "Redact personally identifiable information and custom keywords locally before sending to Gemini, with automatic rehydration of responses.",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "wxt",
