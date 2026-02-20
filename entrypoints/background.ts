@@ -128,14 +128,12 @@ export default defineBackground(async () => {
 // PII Redaction function
 // Supported PII: email, phone number, SSN, IpV4 address, Credit card
 function transformText(text: string): string {
-  console.log(text);
   const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/gi;
-  const phoneRegex = /\b\d{3}[-.]?\d{3}[-.]?\d{4}\b/g;
+  const phoneRegex = /(\+\d{1,2}\s)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}/gi
   const ssnRegex = /\b(?!000|666|9\d{2})\d{3}?-(?!00)\d{2}?-(?!0{4})\d{4}\b/g;
   const ipAddRegex = /\b(25[0-5]|2[0-4]\d|1?\d{1,2})(\.(25[0-5]|2[0-4]\d|1?\d{1,2})){3}\b/gi;
   const ccRegex = /\b(?:4\d{3}|5[1-5]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))\d{0,12}(?:[\s-]?\d{4}){0,3}\b/g; //TODO: Add support for AMEX cards
   const customPIIRegex = customPII2Regex();
-  console.log("custom PII regex: ", customPIIRegex);
 
   let cleanedString = text
     .replace(emailRegex, (match) => {
@@ -160,7 +158,6 @@ function transformText(text: string): string {
     });
   }
 
-
   return cleanedString;
 }
 
@@ -182,8 +179,6 @@ function replaceUpdateInput(matchText: string, type: string) {
 }
 
 function rehydratePII(text: string) {
-  console.log(piiReverseHashmap);
-  console.log(text);
   const pattern = new RegExp(Object.keys(piiReverseHashmap).join("|"), "g");
   const result = text.replace(pattern, (matched) => piiReverseHashmap[matched]);
   return result;
@@ -209,7 +204,6 @@ function escapeSpecialChars(text: string) {
 function customPII2Regex() {
   const escCustomPII = Array.from(customPII, (text) => escapeSpecialChars(text));
   const strPattern = escCustomPII.join('|');
-  console.log("string pattern of the regex: ", strPattern);
   return new RegExp(strPattern, 'gi');
 }
 
@@ -255,7 +249,6 @@ async function llmRedaction(input: string, modelName: string, userRules: string)
     });
 
     if (response && response.success) {
-      console.log(response.processedText);
       const responseObj = JSON.parse(response.processedText);
       const elementsArray = [...new Set(responseObj["elements"])] as string[];
 
@@ -268,8 +261,6 @@ async function llmRedaction(input: string, modelName: string, userRules: string)
         });
       }
 
-      console.log("Elements tracked:", elementsArray);
-      console.log("Keyed string:", keyedRedactedString);
       return keyedRedactedString;
     } else {
       throw new Error(response?.error || `Error performing LLM redaction with ${modelName}`);
