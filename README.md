@@ -1,3 +1,15 @@
-# WXT + React
+# PII Redactor for Gemini
 
-This template should help get you started developing with React in WXT.
+## Why this project came to be
+I found myself constantly going back to manually redact sensitive inputs from my prompts, and quite frankly, I'm too lazy to keep doing that by hand.
+
+## Novelty
+- **LLM Enabled**: Intelligent PII detection and redaction using local LLMs.
+- **In-Browser**: All processing happens locally within your browser—no data leaves your device.
+- **Near-Instant Redaction**: Optimized for speed to minimize friction.
+- **Response Rehydration**: Automatically restores redacted information in Gemini's responses for a seamless experience.
+
+## Stack
+- **Framework**: React, TypeScript, WXT
+- **UI**: Mantine
+- **AI**: WebLLM (running Llama-3-8B-Instruct in browser)
