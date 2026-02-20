@@ -1,5 +1,5 @@
 # PII Redactor for Gemini
-
+[Try it out!](https://chromewebstore.google.com/detail/kablgelfmefmhnldgibbjhknabokbbgi?utm_source=item-share-cb)
 ## Why this project came to be
 I found myself constantly going back to manually redact sensitive inputs from my prompts, and quite frankly, I'm too lazy to keep doing that by hand.
 
