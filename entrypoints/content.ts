@@ -75,12 +75,10 @@ export default defineContentScript({
                 }
 
                 textInputContent.textContent = redactedTextResult;
-                lastPressedKey = "";
-                lastKeyPressTime = 0;
-                return;
               }
             }
-
+            lastPressedKey = "";
+            lastKeyPressTime = 0;
           }
         }
         lastPressedKey = "Shift";
