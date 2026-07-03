@@ -62,13 +62,11 @@ export default defineBackground(async () => {
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     switch (message.type) {
       case "REDACT":
-        const redactResponse = transformText(message.text);
-        sendResponse(redactResponse);
-        break;
+        transformText(message.text).then(sendResponse);
+        return true; // Keep channel open for async response
       case "REHYDRATE":
-        const rehydResponse = rehydratePII(message.text);
-        sendResponse(rehydResponse);
-        break;
+        rehydratePII(message.text).then(sendResponse);
+        return true; // Keep channel open for async response
       case "GET_PII_STATS":
         sendResponse(piiCountHashmap);
         break;
@@ -126,38 +124,30 @@ export default defineBackground(async () => {
 });
 
 // PII Redaction function
-// Supported PII: email, phone number, SSN, IpV4 address, Credit card
-function transformText(text: string): string {
+// Supported PII: email, phone number, SSN, IpV4 address, Credit card, DOB
+async function transformText(text: string): Promise<string> {
   const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/gi;
   const phoneRegex = /(\+\d{1,2}\s)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}/gi
   const ssnRegex = /\b(?!000|666|9\d{2})\d{3}?-(?!00)\d{2}?-(?!0{4})\d{4}\b/g;
   const ipAddRegex = /\b(25[0-5]|2[0-4]\d|1?\d{1,2})(\.(25[0-5]|2[0-4]\d|1?\d{1,2})){3}\b/gi;
   const ccRegex = /\b(?:4\d{3}|5[1-5]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))\d{0,12}(?:[\s-]?\d{4}){0,3}\b/g; //TODO: Add support for AMEX cards
+  // DOB formats supported: MM/DD/YYYY, DD-MM-YYYY, YYYY-MM-DD, "January 5 1990", "5 Jan 1990", etc.
+  const dobRegex = /\b(?:(?:0?[1-9]|1[0-2])([\/\-\.])(?:0?[1-9]|[12]\d|3[01])\1(?:19|20)\d{2}|(?:0?[1-9]|[12]\d|3[01])([\/\-\.])(?:0?[1-9]|1[0-2])\2(?:19|20)\d{2}|(?:19|20)\d{2}([\/\-\.])(?:0?[1-9]|1[0-2])\3(?:0?[1-9]|[12]\d|3[01])|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(?:0?[1-9]|[12]\d|3[01])(?:st|nd|rd|th)?,?\s+(?:19|20)\d{2}|(?:0?[1-9]|[12]\d|3[01])(?:st|nd|rd|th)?\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?),?\s+(?:19|20)\d{2})\b/gi;
   const customPIIRegex = customPII2Regex();
 
   let cleanedString = text
-    .replace(emailRegex, (match) => {
-      return replaceUpdateInput(match, 'email');
-    })
-    .replace(phoneRegex, (match) => {
-      return replaceUpdateInput(match, 'phone');
-    })
-    .replace(ssnRegex, (match) => {
-      return replaceUpdateInput(match, 'ssn');
-    })
-    .replace(ipAddRegex, (match) => {
-      return replaceUpdateInput(match, 'ip_address');
-    })
-    .replace(ccRegex, (match) => {
-      return replaceUpdateInput(match, 'credit_card');
-    });
+    .replace(emailRegex, (match) => replaceUpdateInput(match, 'email'))
+    .replace(phoneRegex, (match) => replaceUpdateInput(match, 'phone'))
+    .replace(ssnRegex, (match) => replaceUpdateInput(match, 'ssn'))
+    .replace(ipAddRegex, (match) => replaceUpdateInput(match, 'ip_address'))
+    .replace(ccRegex, (match) => replaceUpdateInput(match, 'credit_card'))
+    .replace(dobRegex, (match) => replaceUpdateInput(match, 'dob'));
 
   if (customPII.size > 0) {
-    cleanedString = cleanedString.replace(customPIIRegex, (match) => {
-      return replaceUpdateInput(match, 'custom_pii');
-    });
+    cleanedString = cleanedString.replace(customPIIRegex, (match) => replaceUpdateInput(match, 'custom_pii'));
   }
 
+  await pushToStorage();
   return cleanedString;
 }
 
@@ -172,16 +162,18 @@ function replaceUpdateInput(matchText: string, type: string) {
     browser.runtime.sendMessage({ type: 'PII_COUNT_UPDATED' }).catch(() => {
       console.log("IGNORE: Error due to popup not being open during pii count update");
     });
-    scheduleSave();
     return key;
   }
   return piiHashmap[matchText];
 }
 
-function rehydratePII(text: string) {
-  const pattern = new RegExp(Object.keys(piiReverseHashmap).join("|"), "g");
-  const result = text.replace(pattern, (matched) => piiReverseHashmap[matched]);
-  return result;
+async function rehydratePII(text: string): Promise<string> {
+  await loadFromStorage();
+  const keys = Object.keys(piiReverseHashmap);
+  if (keys.length === 0) return text;
+  const sortedKeys = keys.sort((a, b) => b.length - a.length).map(escapeSpecialChars);
+  const pattern = new RegExp(sortedKeys.join("|"), "g");
+  return text.replace(pattern, (matched) => piiReverseHashmap[matched] ?? matched);
 }
 
 function addCustomPII(customList: string[]) {

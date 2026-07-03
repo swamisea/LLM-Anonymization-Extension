@@ -135,6 +135,41 @@ export default function PIICounter() {
                 </Box>
             </Group>
             <Divider color="#252d3d" />
+            <Box
+                mx="sm"
+                px="sm"
+                py="6"
+                style={{
+                    background: "rgba(34,201,132,0.06)",
+                    border: "1px solid rgba(34,201,132,0.22)",
+                    borderRadius: 8,
+                }}
+            >
+                <Group gap="6" align="center" wrap="nowrap">
+                    <Group gap="3" align="center" wrap="nowrap" style={{ flexShrink: 0 }}>
+                        <Box
+                            px="5"
+                            py="1"
+                            ff="DM Mono"
+                            fz={10}
+                            c="#e8edf5"
+                            style={{
+                                background: "rgba(232,237,245,0.08)",
+                                border: "1px solid rgba(232,237,245,0.18)",
+                                borderRadius: 4,
+                                lineHeight: 1.5,
+                            }}
+                            component="span"
+                        >
+                            Shift
+                        </Box>
+                        <Text ff="DM Mono" fz={10} c="#6b7a96" style={{ lineHeight: 1 }}>×2</Text>
+                    </Group>
+                    <Text ff="DM Sans" fz={11} c="#6b7a96">
+                        Press <Text span ff="DM Sans" fz={11} c="#e8edf5" fw={600}>Shift twice</Text> in the prompt box to redact
+                    </Text>
+                </Group>
+            </Box>
             <Text ff="DM Sans" fz="10" c="#6b7a96" ml="sm" fw="700">DETECTION BREAKDOWN</Text>
             <ScrollArea type="never" mah="125">
                 <SimpleGrid ml="xs" mr="xs" mb="xs" cols={2} spacing="xs">
