@@ -70,7 +70,22 @@ export default defineContentScript({
                 const { enabled: llmEnabled } = await browser.runtime.sendMessage({ type: 'GET_LLM_MODE' });
                 if (llmEnabled) {
                   console.log("[CONTENT] LLM Mode active, performing second pass");
+                  const pulseStyle = document.createElement('style');
+                  pulseStyle.id = 'pii-pulse-style';
+                  pulseStyle.textContent = `
+                    @keyframes pii-pulse {
+                      0%, 100% { box-shadow: rgba(0,0,0,0.16) 0px 2px 8px -2px, 0 0 0 2px #f59e0b; }
+                      50% { box-shadow: rgba(0,0,0,0.16) 0px 2px 8px -2px, 0 0 0 3px rgba(245,158,11,0.4), 0 0 12px 4px rgba(245,158,11,0.25); }
+                    }
+                    .pii-pulsing { animation: pii-pulse 1.2s ease-in-out infinite; }
+                  `;
+                  document.head.appendChild(pulseStyle);
+                  const inputAreaV2 = (container as HTMLElement).closest('input-area-v2') as HTMLElement | null;
+                  const pulseTarget = inputAreaV2 ?? (container as HTMLElement);
+                  pulseTarget.classList.add('pii-pulsing');
                   redactedTextResult = await llmRedactText(redactedTextResult);
+                  pulseTarget.classList.remove('pii-pulsing');
+                  pulseStyle.remove();
                   console.log("[CONTENT] LLM redaction complete");
                 }
 

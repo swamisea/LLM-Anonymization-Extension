@@ -253,6 +253,7 @@ async function llmRedaction(input: string, modelName: string, userRules: string)
         });
       }
 
+      await pushToStorage();
       return keyedRedactedString;
     } else {
       throw new Error(response?.error || `Error performing LLM redaction with ${modelName}`);
