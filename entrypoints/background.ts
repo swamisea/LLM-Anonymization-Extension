@@ -71,7 +71,17 @@ export default defineBackground(async () => {
         sendResponse(piiCountHashmap);
         break;
       case "ADD_CUSTOM_PII":
-        const addCustomPIIResponse = addCustomPII(message.customPII);
+        addCustomPII(message.customPII);
+        sendResponse({ success: true });
+        break;
+      case "REMOVE_CUSTOM_PII":
+        customPII.delete(message.keyword);
+        scheduleSave();
+        sendResponse({ success: true });
+        break;
+      case "REMOVE_LLM_INSTRUCT":
+        llmInstructs = llmInstructs.split('\n').filter(r => r !== message.rule).join('\n');
+        scheduleSave();
         sendResponse({ success: true });
         break;
       case "GET_CUSTOM_PII":
