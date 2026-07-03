@@ -8,6 +8,8 @@ export default function PIICounter() {
     const [customPII, setCustomPII] = useState<string[]>([]);
     const [llmMode, setLLMMode] = useState<boolean>(false);
     const [llmInstructs, setLLMInstructs] = useState<string>("");
+    const [llmRuleInput, setLLMRuleInput] = useState<string>("");
+    const [ruleSaved, setRuleSaved] = useState<boolean>(false);
 
     const fetchPIICount = useCallback(() => {
         browser.runtime.sendMessage({ type: 'GET_PII_STATS' })
@@ -16,15 +18,18 @@ export default function PIICounter() {
     }, []);
 
     const llmRedaction = useCallback(async () => {
+        if (!llmRuleInput.trim()) return;
         try {
-            await browser.runtime.sendMessage({ type: 'SET_LLM_INSTRUCTS', rules: llmInstructs });
-            console.log("LLM Rules updated in background");
+            const newRules = llmInstructs ? `${llmInstructs}\n${llmRuleInput.trim()}` : llmRuleInput.trim();
+            await browser.runtime.sendMessage({ type: 'SET_LLM_INSTRUCTS', rules: newRules });
+            setLLMInstructs(newRules);
+            setLLMRuleInput("");
+            setRuleSaved(true);
+            setTimeout(() => setRuleSaved(false), 2000);
         } catch (error) {
             console.error("Error updating rules:", error);
-        } finally {
-            getLLMInstructs();
         }
-    }, [llmInstructs]);
+    }, [llmRuleInput, llmInstructs]);
 
     const getCustomPII = useCallback(() => {
         browser.runtime.sendMessage({ type: 'GET_CUSTOM_PII' })
@@ -50,12 +55,12 @@ export default function PIICounter() {
         // fetch initial data on mount
         fetchPIICount();
         browser.runtime.sendMessage({ type: 'GET_LLM_MODE' })
-            .then(res => setLLMMode(res.enabled))
+            .then(res => {
+                setLLMMode(res.enabled);
+                if (res.enabled) getLLMInstructs();
+            })
             .catch(console.error);
         getCustomPII();
-        if (llmMode) {
-            getLLMInstructs()
-        }
 
         // handler that makes the backend call
         const handleMessage = (message: any) => {
@@ -171,7 +176,7 @@ export default function PIICounter() {
                 </Group>
             </Box>
             <Text ff="DM Sans" fz="10" c="#6b7a96" ml="sm" fw="700">DETECTION BREAKDOWN</Text>
-            <ScrollArea type="never" mah="125">
+            <ScrollArea type="hover" mah="125">
                 <SimpleGrid ml="xs" mr="xs" mb="xs" cols={2} spacing="xs">
                     {Object.entries(piiData).map(([name, count]) => (
                         <Box
@@ -248,7 +253,13 @@ export default function PIICounter() {
                 {customPII && (
                     customPII.map((keyword) => (
                         <Pill
+                            key={keyword}
                             withRemoveButton
+                            onRemove={() => {
+                                browser.runtime.sendMessage({ type: 'REMOVE_CUSTOM_PII', keyword })
+                                    .then(() => getCustomPII())
+                                    .catch(console.error);
+                            }}
                             bg="rgba(34,201,132,0.12)"
                             bd="1px solid rgba(34,201,132,0.25)"
                             size="sm"
@@ -292,21 +303,22 @@ export default function PIICounter() {
                             },
                         }}
                         placeholder="Enter custom redaction rules (e.g. Redact all names)"
-                        value={llmInstructs}
-                        onChange={(event) => setLLMInstructs(event.currentTarget.value)}
+                        value={llmRuleInput}
+                        onChange={(event) => setLLMRuleInput(event.currentTarget.value)}
                     />
                     <Button
                         ml="lg"
                         mr="lg"
                         size="xs"
                         radius="8"
-                        bg="#22c984"
+                        bg={ruleSaved ? "rgba(34,201,132,0.2)" : "#22c984"}
                         fz="xs"
                         ff="DM Mono"
-                        c="#0f1117"
+                        c={ruleSaved ? "#22c984" : "#0f1117"}
+                        bd={ruleSaved ? "1px solid #22c984" : undefined}
                         onClick={llmRedaction}
                     >
-                        Add Rule
+                        {ruleSaved ? "Saved ✓" : "Add Rule"}
                     </Button>
                     <Group
                         gap="xs"
@@ -315,10 +327,15 @@ export default function PIICounter() {
                         mr="xs"
                     >
                         {llmInstructs && (
-                            llmInstructs.split('\n').map((instruct, index) => (
+                            llmInstructs.split('\n').filter(r => r.trim()).map((instruct, index) => (
                                 <Pill
                                     key={index}
                                     withRemoveButton
+                                    onRemove={() => {
+                                        browser.runtime.sendMessage({ type: 'REMOVE_LLM_INSTRUCT', rule: instruct })
+                                            .then(() => getLLMInstructs())
+                                            .catch(console.error);
+                                    }}
                                     bg="rgba(34,201,132,0.12)"
                                     bd="1px solid rgba(34,201,132,0.25)"
                                     size="sm"
