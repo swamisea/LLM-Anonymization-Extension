@@ -6,7 +6,7 @@ export default defineConfig({
   manifest: {
     name: "PII Redactor for Gemini",
     description: "Secure your Gemini chats by locally redacting PII and sensitive data before it leaves your browser.",
-    version: "1.0.0",
+    version: "1.1.0",
     icons: {
       "16": "icon/16.png",
       "32": "icon/32.png",
